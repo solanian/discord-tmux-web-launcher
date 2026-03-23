@@ -137,18 +137,24 @@ describe('prepareSessionWorkspace', () => {
     execFileSync('git', ['init', '-b', 'main'], { cwd: repoRoot });
     execFileSync('git', ['config', 'user.name', 'test-user'], { cwd: repoRoot });
     execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoRoot });
+    fs.writeFileSync(path.join(repoRoot, '.gitignore'), 'node_modules/\n');
     fs.writeFileSync(path.join(repoRoot, 'tracked.txt'), 'base\n');
     fs.mkdirSync(path.join(repoRoot, '.omx'));
     fs.writeFileSync(path.join(repoRoot, '.omx', 'state.json'), '{}');
-    execFileSync('git', ['add', 'tracked.txt'], { cwd: repoRoot });
+    execFileSync('git', ['add', '.gitignore', 'tracked.txt'], { cwd: repoRoot });
     execFileSync('git', ['commit', '-m', 'init'], { cwd: repoRoot });
     fs.writeFileSync(path.join(repoRoot, 'tracked.txt'), 'modified\n');
+    fs.writeFileSync(path.join(repoRoot, 'notes.txt'), 'untracked\n');
+    fs.mkdirSync(path.join(repoRoot, 'node_modules', '.bin'), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, 'node_modules', '.bin', 'tool'), 'ignored\n');
 
     const workspace = await prepareSessionWorkspace(workspaceRoot, 'git1', repoRoot);
 
     expect(workspace.mode).toBe('git-worktree');
     expect(fs.readFileSync(path.join(workspace.rootDir, 'tracked.txt'), 'utf8')).toBe('modified\n');
+    expect(fs.readFileSync(path.join(workspace.rootDir, 'notes.txt'), 'utf8')).toBe('untracked\n');
     expect(fs.existsSync(path.join(workspace.rootDir, '.omx'))).toBe(false);
+    expect(fs.existsSync(path.join(workspace.rootDir, 'node_modules'))).toBe(false);
 
     await cleanupSessionWorkspace(workspace);
   });

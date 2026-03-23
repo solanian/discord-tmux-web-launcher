@@ -196,7 +196,12 @@ async function tmux(args: string[]): Promise<string> {
 
 async function git(args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('git', args, { encoding: 'utf8' });
-  return stdout.trim();
+  return stdout.trimEnd();
+}
+
+async function gitRaw(args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, { encoding: 'utf8' });
+  return stdout;
 }
 
 function copyProjectSnapshot(sourceDir: string, targetDir: string): void {
@@ -213,6 +218,59 @@ function copyProjectSnapshot(sourceDir: string, targetDir: string): void {
       verbatimSymlinks: true,
       preserveTimestamps: true,
     });
+  }
+}
+
+function copyRelativeEntry(sourceDir: string, targetDir: string, relativePath: string): void {
+  if (PROJECT_STATE_DIRS.has(relativePath.split(path.sep)[0] || relativePath)) {
+    return;
+  }
+
+  const sourcePath = path.join(sourceDir, relativePath);
+  const targetPath = path.join(targetDir, relativePath);
+  if (!fs.existsSync(sourcePath)) {
+    return;
+  }
+
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.rmSync(targetPath, { recursive: true, force: true });
+  fs.cpSync(sourcePath, targetPath, {
+    recursive: true,
+    force: true,
+    verbatimSymlinks: true,
+    preserveTimestamps: true,
+  });
+}
+
+function removeRelativeEntry(targetDir: string, relativePath: string): void {
+  fs.rmSync(path.join(targetDir, relativePath), { recursive: true, force: true });
+}
+
+async function collectUntrackedOverlayPaths(projectPath: string): Promise<string[]> {
+  const output = await git(['-C', projectPath, 'ls-files', '--others', '--exclude-standard']);
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((relativePath) => !PROJECT_STATE_DIRS.has(relativePath.split(path.sep)[0] || relativePath))
+    .sort();
+}
+
+async function applyGitOverlay(projectPath: string, launchDir: string): Promise<void> {
+  const diff = await gitRaw(['-C', projectPath, 'diff', '--binary', '--relative', 'HEAD']);
+  if (diff) {
+    const result = spawnSync('git', ['-C', launchDir, 'apply', '--whitespace=nowarn'], {
+      input: diff,
+      encoding: 'utf8',
+    });
+    if (result.status !== 0) {
+      throw new Error(result.stderr || 'Failed to apply git diff overlay');
+    }
+  }
+
+  const untrackedPaths = await collectUntrackedOverlayPaths(projectPath);
+  for (const relativePath of untrackedPaths) {
+    copyRelativeEntry(projectPath, launchDir, relativePath);
   }
 }
 
@@ -236,9 +294,9 @@ export async function prepareSessionWorkspace(
   const gitRoot = await findGitRoot(projectPath);
   if (gitRoot) {
     await git(['-C', gitRoot, 'worktree', 'add', '--detach', rootDir, 'HEAD']);
-    copyProjectSnapshot(gitRoot, rootDir);
     const relativeProjectPath = path.relative(gitRoot, projectPath);
     const launchDir = relativeProjectPath ? path.join(rootDir, relativeProjectPath) : rootDir;
+    await applyGitOverlay(projectPath, launchDir);
     return { rootDir, launchDir, mode: 'git-worktree' };
   }
 
