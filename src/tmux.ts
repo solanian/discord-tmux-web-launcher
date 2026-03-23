@@ -30,6 +30,7 @@ export interface SessionWorkspacePaths {
 }
 
 interface SharedRuntimeHomes {
+  homeDir: string;
   codexHomeDir: string;
   claudeConfigDir: string;
 }
@@ -57,6 +58,11 @@ const SHARED_CLAUDE_ENTRIES = [
   'plugins',
   'mcp_servers.json',
   'mcp-needs-auth-cache.json',
+];
+
+const SHARED_CLAUDE_HOME_ENTRIES = [
+  '.claude.json',
+  '.claude.json.backup',
 ];
 
 const PROJECT_STATE_DIRS = new Set(['.omx', '.claude', '.omc']);
@@ -121,6 +127,7 @@ export function buildSessionRuntimePaths(runtimeRootDir: string, sessionId: stri
 
 function resolveSharedRuntimeHomes(): SharedRuntimeHomes {
   return {
+    homeDir: os.homedir(),
     codexHomeDir: process.env.CODEX_HOME || path.join(os.homedir(), '.codex'),
     claudeConfigDir: process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'),
   };
@@ -138,6 +145,10 @@ function linkSharedEntry(sharedRoot: string, sessionRoot: string, name: string):
 }
 
 function seedSessionRuntimePaths(runtimePaths: SessionRuntimePaths, sharedHomes: SharedRuntimeHomes): void {
+  for (const name of SHARED_CLAUDE_HOME_ENTRIES) {
+    linkSharedEntry(sharedHomes.homeDir, runtimePaths.rootDir, name);
+  }
+
   for (const name of SHARED_CODEX_ENTRIES) {
     linkSharedEntry(sharedHomes.codexHomeDir, runtimePaths.codexHomeDir, name);
   }
@@ -170,7 +181,10 @@ export function buildLaunchCommand(
     ? `node ${quoteShellArg(config.omcCliEntry)} --madmax`
     : 'claude --dangerously-skip-permissions';
 
-  return `${buildEnvPrefix({ CLAUDE_CONFIG_DIR: runtimePaths.claudeConfigDir })}${baseCommand}`;
+  return `${buildEnvPrefix({
+    HOME: runtimePaths.rootDir,
+    CLAUDE_CONFIG_DIR: runtimePaths.claudeConfigDir,
+  })}${baseCommand}`;
 }
 
 async function tmux(args: string[]): Promise<string> {

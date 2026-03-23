@@ -75,18 +75,24 @@ describe('session runtime paths', () => {
 
   it('preserves shared auth/config entries via symlinks', () => {
     const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dtwl-runtime-'));
+    const sharedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dtwl-home-'));
     const sharedCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dtwl-codex-'));
     const sharedClaudeConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'dtwl-claude-'));
+    fs.writeFileSync(path.join(sharedHome, '.claude.json'), '{"projects":[]}');
     fs.writeFileSync(path.join(sharedCodexHome, 'auth.json'), '{"ok":true}');
     fs.writeFileSync(path.join(sharedCodexHome, 'config.toml'), 'model = "gpt-5.4"\n');
     fs.writeFileSync(path.join(sharedClaudeConfig, '.credentials.json'), '{"ok":true}');
     fs.writeFileSync(path.join(sharedClaudeConfig, 'settings.json'), '{"theme":"dark"}');
 
     const runtimePaths = ensureSessionRuntimePaths(buildSessionRuntimePaths(runtimeRoot, 'abc123'), {
+      homeDir: sharedHome,
       codexHomeDir: sharedCodexHome,
       claudeConfigDir: sharedClaudeConfig,
     });
 
+    expect(fs.readlinkSync(path.join(runtimePaths.rootDir, '.claude.json'))).toBe(
+      path.join(sharedHome, '.claude.json'),
+    );
     expect(fs.readlinkSync(path.join(runtimePaths.codexHomeDir, 'auth.json'))).toBe(
       path.join(sharedCodexHome, 'auth.json'),
     );
@@ -153,7 +159,8 @@ describe('buildLaunchCommand', () => {
       codexHomeDir: '/tmp/runtime/abc123/codex-home',
       claudeConfigDir: '/tmp/runtime/abc123/claude-config',
     });
-    expect(command).toContain("env CLAUDE_CONFIG_DIR='/tmp/runtime/abc123/claude-config'");
+    expect(command).toContain("env HOME='/tmp/runtime/abc123'");
+    expect(command).toContain("CLAUDE_CONFIG_DIR='/tmp/runtime/abc123/claude-config'");
     expect(command).toContain("node '/tmp/omc/index.js' --madmax");
   });
 
@@ -164,7 +171,7 @@ describe('buildLaunchCommand', () => {
       claudeConfigDir: '/tmp/runtime/abc123/claude-config',
     });
     expect(command).toBe(
-      "env CLAUDE_CONFIG_DIR='/tmp/runtime/abc123/claude-config' claude --dangerously-skip-permissions",
+      "env HOME='/tmp/runtime/abc123' CLAUDE_CONFIG_DIR='/tmp/runtime/abc123/claude-config' claude --dangerously-skip-permissions",
     );
   });
 });
