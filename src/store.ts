@@ -94,4 +94,19 @@ export class SessionStore {
     this.write(payload);
     return session;
   }
+
+  removeByIds(ids: string[]): number {
+    if (ids.length === 0) {
+      return 0;
+    }
+
+    const idSet = new Set(ids);
+    const payload = this.read();
+    const nextSessions = payload.sessions.filter((entry) => !idSet.has(entry.id));
+    const removedCount = payload.sessions.length - nextSessions.length;
+    if (removedCount > 0) {
+      this.write({ sessions: nextSessions });
+    }
+    return removedCount;
+  }
 }

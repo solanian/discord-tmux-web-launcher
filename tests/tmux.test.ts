@@ -9,6 +9,7 @@ import { loadEnvFile } from '../src/config.js';
 import {
   buildLaunchCommand,
   buildSessionRuntimePaths,
+  cleanupSessionArtifacts,
   cleanupSessionWorkspace,
   ensureSessionRuntimePaths,
   prepareSessionWorkspace,
@@ -31,6 +32,16 @@ describe('validateProjectPath', () => {
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'dtwl-outside-'));
 
     expect(() => validateProjectPath(outside, [allowed])).toThrow(/outside allowed roots/);
+  });
+
+  it('creates a missing directory under an allowed root', () => {
+    const allowed = fs.mkdtempSync(path.join(os.tmpdir(), 'dtwl-allowed-'));
+    const target = path.join(allowed, 'nested', 'project');
+
+    const resolved = validateProjectPath(target, [allowed]);
+
+    expect(resolved).toBe(fs.realpathSync(target));
+    expect(fs.existsSync(target)).toBe(true);
   });
 });
 
@@ -140,6 +151,29 @@ describe('prepareSessionWorkspace', () => {
     expect(fs.existsSync(path.join(workspace.rootDir, '.omx'))).toBe(false);
 
     await cleanupSessionWorkspace(workspace);
+  });
+});
+
+describe('cleanupSessionArtifacts', () => {
+  it('removes runtime and snapshot workspace directories', async () => {
+    const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dtwl-runtime-artifacts-'));
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dtwl-workspace-artifacts-'));
+    const runtimeDir = path.join(runtimeRoot, 'sess1');
+    const workspaceDir = path.join(workspaceRoot, 'sess1');
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.writeFileSync(path.join(runtimeDir, 'state.json'), '{}');
+    fs.writeFileSync(path.join(workspaceDir, 'README.md'), 'hello');
+
+    await cleanupSessionArtifacts({
+      tmuxSessionName: 'pending',
+      runtimeDir,
+      workspaceDir,
+      workspaceMode: 'snapshot-copy',
+    });
+
+    expect(fs.existsSync(runtimeDir)).toBe(false);
+    expect(fs.existsSync(workspaceDir)).toBe(false);
   });
 });
 

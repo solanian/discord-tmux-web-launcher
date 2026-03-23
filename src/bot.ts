@@ -15,9 +15,11 @@ import type { AppConfig, LaunchMode } from './config.js';
 import { SessionStore } from './store.js';
 import { createLogger } from './logger.js';
 import {
+  cleanupSessionArtifacts,
   cleanupSessionWorkspace,
   createTmuxSession,
   ensureTmuxInstalled,
+  sessionExists,
   stopTmuxSession,
   validateProjectPath,
 } from './tmux.js';
@@ -57,6 +59,9 @@ function buildCommands() {
           .setDescription('Session id returned by /launch')
           .setRequired(true),
       ),
+    new SlashCommandBuilder()
+      .setName('prune')
+      .setDescription('Remove stopped/error/pending-or-dead sessions and clean up artifacts'),
   ];
 }
 
@@ -164,15 +169,39 @@ async function handleStop(interaction: ChatInputCommandInteraction, store: Sessi
   try {
     await stopTmuxSession(session.tmuxSessionName);
   } catch {}
-  if (session.workspaceDir && session.workspaceMode) {
-    await cleanupSessionWorkspace({
-      rootDir: session.workspaceDir,
-      launchDir: session.workspaceDir,
-      mode: session.workspaceMode,
-    }).catch(() => {});
-  }
   store.updateStatus(id, 'stopped');
   await interaction.reply({ ephemeral: true, content: `Stopped session \`${id}\`.` });
+}
+
+async function handlePrune(interaction: ChatInputCommandInteraction, store: SessionStore) {
+  const sessions = store.all();
+  const removable = [];
+
+  for (const session of sessions) {
+    if (session.status === 'stopped' || session.status === 'error' || session.tmuxSessionName === 'pending') {
+      removable.push(session);
+      continue;
+    }
+
+    if (session.status === 'running' && session.tmuxSessionName && !(await sessionExists(session.tmuxSessionName))) {
+      removable.push(session);
+    }
+  }
+
+  if (removable.length === 0) {
+    await interaction.reply({ ephemeral: true, content: 'No prune targets found.' });
+    return;
+  }
+
+  for (const session of removable) {
+    await cleanupSessionArtifacts(session);
+  }
+  const removedCount = store.removeByIds(removable.map((session) => session.id));
+
+  await interaction.reply({
+    ephemeral: true,
+    content: `Pruned ${removedCount} session(s): ${removable.map((session) => `\`${session.id}\``).join(', ')}`,
+  });
 }
 
 async function handleInteraction(interaction: Interaction, config: AppConfig, store: SessionStore) {
@@ -189,6 +218,9 @@ async function handleInteraction(interaction: Interaction, config: AppConfig, st
       break;
     case 'stop':
       await handleStop(interaction, store);
+      break;
+    case 'prune':
+      await handlePrune(interaction, store);
       break;
     default:
       await interaction.reply({ ephemeral: true, content: 'Unknown command' });

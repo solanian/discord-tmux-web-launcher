@@ -78,25 +78,27 @@ export function validateProjectPath(inputPath: string, allowedRoots: string[]): 
   if (!path.isAbsolute(inputPath)) {
     throw new Error('Project path must be an absolute path');
   }
-  if (!fs.existsSync(inputPath)) {
-    throw new Error(`Directory does not exist: ${inputPath}`);
-  }
-  const stats = fs.statSync(inputPath);
-  if (!stats.isDirectory()) {
-    throw new Error(`Path is not a directory: ${inputPath}`);
-  }
 
-  const resolvedPath = fs.realpathSync(inputPath);
+  const resolvedCandidatePath = path.resolve(inputPath);
   const resolvedRoots = allowedRoots.map((root) => fs.realpathSync(root));
   const isAllowed = resolvedRoots.some((root) => {
-    return resolvedPath === root || resolvedPath.startsWith(`${root}${path.sep}`);
+    return resolvedCandidatePath === root || resolvedCandidatePath.startsWith(`${root}${path.sep}`);
   });
 
   if (!isAllowed) {
-    throw new Error(`Path is outside allowed roots: ${resolvedPath}`);
+    throw new Error(`Path is outside allowed roots: ${resolvedCandidatePath}`);
   }
 
-  return resolvedPath;
+  if (!fs.existsSync(resolvedCandidatePath)) {
+    fs.mkdirSync(resolvedCandidatePath, { recursive: true });
+  }
+
+  const stats = fs.statSync(resolvedCandidatePath);
+  if (!stats.isDirectory()) {
+    throw new Error(`Path is not a directory: ${resolvedCandidatePath}`);
+  }
+
+  return fs.realpathSync(resolvedCandidatePath);
 }
 
 export function buildTmuxSessionName(prefix: string, id: string, mode: LaunchMode): string {
@@ -253,6 +255,31 @@ export async function cleanupSessionWorkspace(workspace: SessionWorkspacePaths):
   }
 
   fs.rmSync(workspace.rootDir, { recursive: true, force: true });
+}
+
+export async function cleanupSessionArtifacts(session: {
+  tmuxSessionName?: string;
+  workspaceDir?: string;
+  workspaceMode?: 'git-worktree' | 'snapshot-copy';
+  runtimeDir?: string;
+}): Promise<void> {
+  if (session.tmuxSessionName && session.tmuxSessionName !== 'pending') {
+    try {
+      await stopTmuxSession(session.tmuxSessionName);
+    } catch {}
+  }
+
+  if (session.workspaceDir && session.workspaceMode) {
+    await cleanupSessionWorkspace({
+      rootDir: session.workspaceDir,
+      launchDir: session.workspaceDir,
+      mode: session.workspaceMode,
+    }).catch(() => {});
+  }
+
+  if (session.runtimeDir) {
+    fs.rmSync(session.runtimeDir, { recursive: true, force: true });
+  }
 }
 
 async function getPrimaryPaneTarget(tmuxSessionName: string): Promise<string> {
