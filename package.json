@@ -4,6 +4,23 @@
   "private": true,
   "type": "module",
   "description": "Discord-triggered OMX/OMC tmux launcher with xterm.js web viewer",
+  "homepage": "https://github.com/solanian/discord-tmux-web-launcher",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/solanian/discord-tmux-web-launcher.git"
+  },
+  "bugs": {
+    "url": "https://github.com/solanian/discord-tmux-web-launcher/issues"
+  },
+  "keywords": [
+    "discord",
+    "tmux",
+    "xtermjs",
+    "typescript",
+    "websocket",
+    "omx",
+    "claude"
+  ],
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",

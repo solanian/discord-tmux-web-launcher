@@ -1,5 +1,10 @@
 # Discord tmux web launcher
 
+[![Release](https://img.shields.io/github/v/release/solanian/discord-tmux-web-launcher?display_name=tag)](https://github.com/solanian/discord-tmux-web-launcher/releases)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-22%2B-5FA04E?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![discord.js](https://img.shields.io/badge/discord.js-14-5865F2?logo=discord&logoColor=white)](https://discord.js.org/)
+
 Discord에서 `omx`/`omc` 실행 대상 폴더를 지정하면 새 tmux session을 만들고, xterm.js 웹 화면으로 그 세션을 볼 수 있게 해주는 독립 프로젝트입니다.
 
 ## 기능
