@@ -2,6 +2,7 @@ import {
   Client,
   Events,
   GatewayIntentBits,
+  MessageFlags,
   REST,
   Routes,
   SlashCommandBuilder,
@@ -79,6 +80,8 @@ async function handleLaunch(interaction: ChatInputCommandInteraction, config: Ap
   let sessionId: string | undefined;
 
   try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    logger.log(`Launch requested: mode=${mode} path=${requestedPath}`);
     ensureTmuxInstalled();
     const projectPath = validateProjectPath(requestedPath, config.allowedRoots);
     const session = store.create({
@@ -108,8 +111,7 @@ async function handleLaunch(interaction: ChatInputCommandInteraction, config: Ap
     store.update(updated);
 
     const url = `${config.baseUrl.replace(/\/$/, '')}/view/${updated.token}`;
-    await interaction.reply({
-      ephemeral: true,
+    await interaction.editReply({
       content: [
         `Created **${mode.toUpperCase()}** session.`,
         `- id: \`${updated.id}\``,
@@ -125,10 +127,14 @@ async function handleLaunch(interaction: ChatInputCommandInteraction, config: Ap
       store.updateStatus(sessionId, 'error');
     }
     const message = error instanceof Error ? error.message : String(error);
-    await interaction.reply({
-      ephemeral: true,
-      content: `Launch failed: ${message}`,
-    });
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(`Launch failed: ${message}`);
+    } else {
+      await interaction.reply({
+        ephemeral: true,
+        content: `Launch failed: ${message}`,
+      });
+    }
   }
 }
 
