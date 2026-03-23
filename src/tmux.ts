@@ -183,10 +183,7 @@ export function buildLaunchCommand(
     ? `node ${quoteShellArg(config.omcCliEntry)} --madmax`
     : 'claude --dangerously-skip-permissions';
 
-  return `${buildEnvPrefix({
-    HOME: runtimePaths.rootDir,
-    CLAUDE_CONFIG_DIR: runtimePaths.claudeConfigDir,
-  })}${baseCommand}`;
+  return baseCommand;
 }
 
 async function tmux(args: string[]): Promise<string> {

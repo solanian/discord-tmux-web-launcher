@@ -199,9 +199,7 @@ describe('buildLaunchCommand', () => {
       codexHomeDir: '/tmp/runtime/abc123/codex-home',
       claudeConfigDir: '/tmp/runtime/abc123/claude-config',
     });
-    expect(command).toContain("env HOME='/tmp/runtime/abc123'");
-    expect(command).toContain("CLAUDE_CONFIG_DIR='/tmp/runtime/abc123/claude-config'");
-    expect(command).toContain("node '/tmp/omc/index.js' --madmax");
+    expect(command).toBe("node '/tmp/omc/index.js' --madmax");
   });
 
   it('falls back to Claude with isolated CLAUDE_CONFIG_DIR when no OMC entry is configured', () => {
@@ -210,8 +208,6 @@ describe('buildLaunchCommand', () => {
       codexHomeDir: '/tmp/runtime/abc123/codex-home',
       claudeConfigDir: '/tmp/runtime/abc123/claude-config',
     });
-    expect(command).toBe(
-      "env HOME='/tmp/runtime/abc123' CLAUDE_CONFIG_DIR='/tmp/runtime/abc123/claude-config' claude --dangerously-skip-permissions",
-    );
+    expect(command).toBe('claude --dangerously-skip-permissions');
   });
 });
