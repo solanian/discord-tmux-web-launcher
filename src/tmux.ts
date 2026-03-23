@@ -14,12 +14,19 @@ export interface LaunchSessionParams {
   mode: LaunchMode;
   projectPath: string;
   runtimeRootDir: string;
+  workspaceRootDir: string;
 }
 
 export interface SessionRuntimePaths {
   rootDir: string;
   codexHomeDir: string;
   claudeConfigDir: string;
+}
+
+export interface SessionWorkspacePaths {
+  rootDir: string;
+  launchDir: string;
+  mode: 'git-worktree' | 'snapshot-copy';
 }
 
 interface SharedRuntimeHomes {
@@ -51,6 +58,8 @@ const SHARED_CLAUDE_ENTRIES = [
   'mcp_servers.json',
   'mcp-needs-auth-cache.json',
 ];
+
+const PROJECT_STATE_DIRS = new Set(['.omx', '.claude', '.omc']);
 
 export function ensureTmuxInstalled(): void {
   const result = spawnSync('tmux', ['-V'], { encoding: 'utf8' });
@@ -169,6 +178,69 @@ async function tmux(args: string[]): Promise<string> {
   return stdout;
 }
 
+async function git(args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, { encoding: 'utf8' });
+  return stdout.trim();
+}
+
+function copyProjectSnapshot(sourceDir: string, targetDir: string): void {
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    if (PROJECT_STATE_DIRS.has(entry.name) || entry.name === '.git') {
+      continue;
+    }
+
+    fs.cpSync(path.join(sourceDir, entry.name), path.join(targetDir, entry.name), {
+      recursive: true,
+      force: true,
+      verbatimSymlinks: true,
+      preserveTimestamps: true,
+    });
+  }
+}
+
+async function findGitRoot(projectPath: string): Promise<string | null> {
+  try {
+    return await git(['-C', projectPath, 'rev-parse', '--show-toplevel']);
+  } catch {
+    return null;
+  }
+}
+
+export async function prepareSessionWorkspace(
+  workspaceRootDir: string,
+  sessionId: string,
+  projectPath: string,
+): Promise<SessionWorkspacePaths> {
+  const rootDir = path.join(workspaceRootDir, sessionId);
+  fs.rmSync(rootDir, { recursive: true, force: true });
+  fs.mkdirSync(workspaceRootDir, { recursive: true });
+
+  const gitRoot = await findGitRoot(projectPath);
+  if (gitRoot) {
+    await git(['-C', gitRoot, 'worktree', 'add', '--detach', rootDir, 'HEAD']);
+    copyProjectSnapshot(gitRoot, rootDir);
+    const relativeProjectPath = path.relative(gitRoot, projectPath);
+    const launchDir = relativeProjectPath ? path.join(rootDir, relativeProjectPath) : rootDir;
+    return { rootDir, launchDir, mode: 'git-worktree' };
+  }
+
+  copyProjectSnapshot(projectPath, rootDir);
+  return { rootDir, launchDir: rootDir, mode: 'snapshot-copy' };
+}
+
+export async function cleanupSessionWorkspace(workspace: SessionWorkspacePaths): Promise<void> {
+  if (workspace.mode === 'git-worktree') {
+    try {
+      await git(['-C', workspace.rootDir, 'worktree', 'remove', '--force', workspace.rootDir]);
+      return;
+    } catch {}
+  }
+
+  fs.rmSync(workspace.rootDir, { recursive: true, force: true });
+}
+
 async function getPrimaryPaneTarget(tmuxSessionName: string): Promise<string> {
   const stdout = await tmux(['list-panes', '-t', tmuxSessionName, '-F', '#{pane_id}']);
   const paneId = stdout
@@ -186,18 +258,32 @@ async function getPrimaryPaneTarget(tmuxSessionName: string): Promise<string> {
 export async function createTmuxSession(
   params: LaunchSessionParams,
   config: Pick<AppConfig, 'omcCliEntry'>,
-): Promise<{ tmuxSessionName: string; launchCommand: string; runtimePaths: SessionRuntimePaths }> {
+): Promise<{
+  tmuxSessionName: string;
+  launchCommand: string;
+  runtimePaths: SessionRuntimePaths;
+  workspace: SessionWorkspacePaths;
+}> {
   const tmuxSessionName = buildTmuxSessionName(params.sessionPrefix, params.sessionId, params.mode);
   const runtimePaths = ensureSessionRuntimePaths(
     buildSessionRuntimePaths(params.runtimeRootDir, params.sessionId),
   );
+  const workspace = await prepareSessionWorkspace(
+    params.workspaceRootDir,
+    params.sessionId,
+    params.projectPath,
+  );
   const launchCommand = buildLaunchCommand(params.mode, config, runtimePaths);
 
-  await tmux(['new-session', '-d', '-s', tmuxSessionName, '-c', params.projectPath]);
-  const paneTarget = await getPrimaryPaneTarget(tmuxSessionName);
-  await tmux(['send-keys', '-t', paneTarget, launchCommand, 'Enter']);
-
-  return { tmuxSessionName, launchCommand, runtimePaths };
+  try {
+    await tmux(['new-session', '-d', '-s', tmuxSessionName, '-c', workspace.launchDir]);
+    const paneTarget = await getPrimaryPaneTarget(tmuxSessionName);
+    await tmux(['send-keys', '-t', paneTarget, launchCommand, 'Enter']);
+    return { tmuxSessionName, launchCommand, runtimePaths, workspace };
+  } catch (error) {
+    await cleanupSessionWorkspace(workspace).catch(() => {});
+    throw error;
+  }
 }
 
 export async function sessionExists(tmuxSessionName: string): Promise<boolean> {

@@ -65,7 +65,7 @@ export function loadEnvFile(envPath = path.resolve(process.cwd(), '.env')): void
 }
 
 export function parseAllowedRoots(raw: string | undefined): string[] {
-  const roots = (raw ?? '/home/dsseo/workspace')
+  const roots = (raw ?? path.join(os.homedir(), 'workspace'))
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean)

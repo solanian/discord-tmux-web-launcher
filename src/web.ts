@@ -5,12 +5,12 @@ import { WebSocketServer } from 'ws';
 
 import type { AppConfig } from './config.js';
 import type { SessionStore } from './store.js';
-import { getPaneWorkingDirectory, sessionExists } from './tmux.js';
+import { getPaneWorkingDirectory, sendInput, sessionExists } from './tmux.js';
 import { createLogger } from './logger.js';
 
 const logger = createLogger('WEB');
 
-function htmlPage(): string {
+export function htmlPage(): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -19,23 +19,59 @@ function htmlPage(): string {
   <title>tmux web viewer</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
   <style>
-    html, body { height: 100%; margin: 0; background: #0b1020; color: #e5e7eb; font-family: system-ui, sans-serif; }
-    #root { display: flex; flex-direction: column; height: 100%; }
+    html, body { height: 100%; margin: 0; overflow: hidden; background: #0b1020; color: #e5e7eb; font-family: system-ui, sans-serif; }
+    #root { display: flex; flex-direction: column; height: 100%; min-height: 0; }
     #bar { padding: 10px 14px; border-bottom: 1px solid #1f2937; background: #111827; font-size: 14px; }
-    #terminal { flex: 1; padding: 8px; }
+    #terminal { flex: 1; min-height: 0; padding: 8px; overflow: hidden; }
+    #composer { position: sticky; bottom: 0; z-index: 5; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid #1f2937; background: #111827; box-shadow: 0 -8px 24px rgba(0,0,0,0.22); }
+    #composerKeys { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .composerKey { min-height: 40px; padding: 8px 10px; border: 1px solid #374151; border-radius: 10px; background: #1f2937; color: #e5e7eb; font-size: 13px; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+    .composerKey:hover { background: #273449; }
+    .composerKey:active { background: #334155; }
+    #composerRow { display: flex; gap: 8px; }
+    #composerInput { flex: 1; min-width: 0; min-height: 42px; padding: 10px 12px; border: 1px solid #374151; border-radius: 10px; background: #0f172a; color: #e5e7eb; font-size: 14px; }
+    #composerInput:focus { outline: 2px solid #2563eb; outline-offset: 1px; border-color: #2563eb; }
+    #composerSend { min-height: 42px; padding: 10px 14px; border: 0; border-radius: 10px; background: #2563eb; color: white; font-size: 14px; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+    #composerSend:hover { background: #1d4ed8; }
     .muted { color: #9ca3af; }
+    @media (max-width: 720px) {
+      #bar { padding: 8px 10px; font-size: 13px; }
+      #terminal { padding: 4px; }
+      #composer { gap: 10px; padding: 10px 10px calc(12px + env(safe-area-inset-bottom)); }
+      #composerKeys { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .composerKey { min-height: 44px; font-size: 14px; }
+      #composerRow { flex-direction: column; }
+      #composerInput { min-height: 44px; font-size: 16px; }
+      #composerSend { width: 100%; min-height: 44px; font-size: 15px; }
+    }
   </style>
 </head>
 <body>
   <div id="root">
     <div id="bar">Connecting…</div>
     <div id="terminal"></div>
+    <div id="composer">
+      <div id="composerKeys">
+        <button class="composerKey" data-key="esc" type="button">Esc</button>
+        <button class="composerKey" data-key="enter" type="button">Enter</button>
+        <button class="composerKey" data-key="backspace" type="button">BS</button>
+        <button class="composerKey" data-key="tab" type="button">Tab</button>
+        <button class="composerKey" data-key="ctrl-c" type="button">Ctrl+C</button>
+      </div>
+      <div id="composerRow">
+        <input id="composerInput" type="text" placeholder="Send text to tmux and press Enter" autocomplete="off" />
+        <button id="composerSend" type="button">Send</button>
+      </div>
+    </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
   <script>
     const token = location.pathname.split('/').pop();
     const bar = document.getElementById('bar');
+    const composerInput = document.getElementById('composerInput');
+    const composerSend = document.getElementById('composerSend');
+    const composerKeys = document.querySelectorAll('.composerKey');
     const term = new Terminal({
       cursorBlink: true,
       fontFamily: 'Menlo, Monaco, Consolas, monospace',
@@ -56,6 +92,34 @@ function htmlPage(): string {
     term.focus();
     term.onData((data) => {
       socket.send(JSON.stringify({ type: 'input', data }));
+    });
+    function sendComposerText() {
+      const value = composerInput.value.trimEnd();
+      if (!value || socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      socket.send(JSON.stringify({ type: 'sendText', data: value }));
+      composerInput.value = '';
+      term.focus();
+    }
+    function sendSpecialKey(keyName) {
+      if (socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      socket.send(JSON.stringify({ type: 'sendKey', data: keyName }));
+      term.focus();
+    }
+    composerSend.addEventListener('click', sendComposerText);
+    composerInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        sendComposerText();
+      }
+    });
+    composerKeys.forEach((button) => {
+      button.addEventListener('click', () => {
+        sendSpecialKey(button.dataset.key);
+      });
     });
     term.onResize(({ cols, rows }) => {
       socket.send(JSON.stringify({ type: 'resize', cols, rows }));
@@ -199,6 +263,24 @@ export function createWebServer(config: AppConfig, store: SessionStore) {
             };
             if (message.type === 'input' && typeof message.data === 'string') {
               pty.write(message.data);
+            } else if (message.type === 'sendText' && typeof message.data === 'string') {
+              void sendInput(session.tmuxSessionName, `${message.data}\r`).catch((error) => {
+                logger.warn('sendText failed:', error);
+              });
+            } else if (message.type === 'sendKey' && typeof message.data === 'string') {
+              const specialKeyMap: Record<string, string> = {
+                esc: '\u001b',
+                enter: '\r',
+                backspace: '\u007f',
+                tab: '\t',
+                'ctrl-c': '\u0003',
+              };
+              const payload = specialKeyMap[message.data];
+              if (payload) {
+                void sendInput(session.tmuxSessionName, payload).catch((error) => {
+                  logger.warn('sendKey failed:', error);
+                });
+              }
             } else if (
               message.type === 'resize' &&
               typeof message.cols === 'number' &&

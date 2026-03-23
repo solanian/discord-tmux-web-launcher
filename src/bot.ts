@@ -13,7 +13,13 @@ import path from 'node:path';
 import type { AppConfig, LaunchMode } from './config.js';
 import { SessionStore } from './store.js';
 import { createLogger } from './logger.js';
-import { createTmuxSession, ensureTmuxInstalled, stopTmuxSession, validateProjectPath } from './tmux.js';
+import {
+  cleanupSessionWorkspace,
+  createTmuxSession,
+  ensureTmuxInstalled,
+  stopTmuxSession,
+  validateProjectPath,
+} from './tmux.js';
 
 const logger = createLogger('BOT');
 
@@ -78,6 +84,8 @@ async function handleLaunch(interaction: ChatInputCommandInteraction, config: Ap
     const session = store.create({
       mode,
       projectPath,
+      workspaceDir: '',
+      workspaceMode: 'snapshot-copy',
       tmuxSessionName: 'pending',
       launchCommand: mode,
       status: 'running',
@@ -89,11 +97,14 @@ async function handleLaunch(interaction: ChatInputCommandInteraction, config: Ap
       mode,
       projectPath,
       runtimeRootDir: path.join(config.dataDir, 'runtime'),
+      workspaceRootDir: path.join(config.dataDir, 'workspaces'),
     }, config);
     const updated = store.getById(session.id)!;
     updated.tmuxSessionName = created.tmuxSessionName;
     updated.launchCommand = created.launchCommand;
     updated.runtimeDir = created.runtimePaths.rootDir;
+    updated.workspaceDir = created.workspace.rootDir;
+    updated.workspaceMode = created.workspace.mode;
     store.update(updated);
 
     const url = `${config.baseUrl.replace(/\/$/, '')}/view/${updated.token}`;
@@ -103,6 +114,7 @@ async function handleLaunch(interaction: ChatInputCommandInteraction, config: Ap
         `Created **${mode.toUpperCase()}** session.`,
         `- id: \`${updated.id}\``,
         `- path: \`${projectPath}\``,
+        `- workspace: \`${updated.workspaceDir}\``,
         `- tmux: \`${updated.tmuxSessionName}\``,
         `- runtime: \`${updated.runtimeDir}\``,
         `- web: ${url}`,
@@ -146,6 +158,13 @@ async function handleStop(interaction: ChatInputCommandInteraction, store: Sessi
   try {
     await stopTmuxSession(session.tmuxSessionName);
   } catch {}
+  if (session.workspaceDir && session.workspaceMode) {
+    await cleanupSessionWorkspace({
+      rootDir: session.workspaceDir,
+      launchDir: session.workspaceDir,
+      mode: session.workspaceMode,
+    }).catch(() => {});
+  }
   store.updateStatus(id, 'stopped');
   await interaction.reply({ ephemeral: true, content: `Stopped session \`${id}\`.` });
 }

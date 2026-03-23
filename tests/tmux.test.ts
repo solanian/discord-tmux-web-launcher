@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 import { describe, expect, it } from 'vitest';
 
@@ -8,7 +9,9 @@ import { loadEnvFile } from '../src/config.js';
 import {
   buildLaunchCommand,
   buildSessionRuntimePaths,
+  cleanupSessionWorkspace,
   ensureSessionRuntimePaths,
+  prepareSessionWorkspace,
   splitInput,
   validateProjectPath,
 } from '../src/tmux.js';
@@ -90,6 +93,47 @@ describe('session runtime paths', () => {
     expect(fs.readlinkSync(path.join(runtimePaths.claudeConfigDir, '.credentials.json'))).toBe(
       path.join(sharedClaudeConfig, '.credentials.json'),
     );
+  });
+});
+
+describe('prepareSessionWorkspace', () => {
+  it('copies a non-git project into an isolated snapshot without local state dirs', async () => {
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dtwl-project-'));
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dtwl-workspace-'));
+    fs.writeFileSync(path.join(projectRoot, 'README.md'), 'hello');
+    fs.mkdirSync(path.join(projectRoot, '.omx'));
+    fs.writeFileSync(path.join(projectRoot, '.omx', 'state.json'), '{}');
+
+    const workspace = await prepareSessionWorkspace(workspaceRoot, 'snap1', projectRoot);
+
+    expect(workspace.mode).toBe('snapshot-copy');
+    expect(fs.readFileSync(path.join(workspace.rootDir, 'README.md'), 'utf8')).toBe('hello');
+    expect(fs.existsSync(path.join(workspace.rootDir, '.omx'))).toBe(false);
+
+    await cleanupSessionWorkspace(workspace);
+  });
+
+  it('creates a git worktree snapshot and overlays current uncommitted files', async () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dtwl-git-'));
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dtwl-git-workspace-'));
+
+    execFileSync('git', ['init', '-b', 'main'], { cwd: repoRoot });
+    execFileSync('git', ['config', 'user.name', 'test-user'], { cwd: repoRoot });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoRoot });
+    fs.writeFileSync(path.join(repoRoot, 'tracked.txt'), 'base\n');
+    fs.mkdirSync(path.join(repoRoot, '.omx'));
+    fs.writeFileSync(path.join(repoRoot, '.omx', 'state.json'), '{}');
+    execFileSync('git', ['add', 'tracked.txt'], { cwd: repoRoot });
+    execFileSync('git', ['commit', '-m', 'init'], { cwd: repoRoot });
+    fs.writeFileSync(path.join(repoRoot, 'tracked.txt'), 'modified\n');
+
+    const workspace = await prepareSessionWorkspace(workspaceRoot, 'git1', repoRoot);
+
+    expect(workspace.mode).toBe('git-worktree');
+    expect(fs.readFileSync(path.join(workspace.rootDir, 'tracked.txt'), 'utf8')).toBe('modified\n');
+    expect(fs.existsSync(path.join(workspace.rootDir, '.omx'))).toBe(false);
+
+    await cleanupSessionWorkspace(workspace);
   });
 });
 

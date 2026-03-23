@@ -9,6 +9,8 @@ export interface SessionRecord {
   token: string;
   mode: LaunchMode;
   projectPath: string;
+  workspaceDir?: string;
+  workspaceMode?: 'git-worktree' | 'snapshot-copy';
   tmuxSessionName: string;
   launchCommand: string;
   createdAt: string;
